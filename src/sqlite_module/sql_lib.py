@@ -67,6 +67,34 @@ def load_admin_from_json(path_to_admin_file: str = "./settings/admins.json") -> 
             f'Произошла ошибка при загрузке администраторов из {path_to_admin_file}', exc_info=True)
 
 
+def chengelog_insert(tg_id: str, change_type: str):
+    try:
+        with SQLite() as cursor:
+            sqlite_logger.info("Записываем внесенные изменения в CHANGELOG")
+            user_name = return_fio(tg_id)
+            cursor.execute(
+                f"""INSERT INTO CHANGELOG(CHANGER_FIO, CHANGE_TYPE) VALUES('{user_name}','{change_type}')""")
+            sqlite_logger.info(
+                f"Изменения типа {change_type} от {tg_id} успешно внесены")
+    except Exception:
+        sqlite_logger.error(
+            f'Ошибка при внесении изменений {tg_id} {change_type}')
+
+
+def return_fio(tg_id: str) -> str:
+    try:
+        with SQLite() as cursor:
+            sqlite_logger.info(f"Запрашиваем фио пользователя {tg_id}")
+            user_name = cursor.execute(
+                f"SELECT fio FROM ACCESS_TABLE WHERE tg_id='{tg_id}'").fetchone()
+            sqlite_logger.info(
+                f"Пользователь {tg_id} определен {user_name[0]}")
+            return user_name[0]
+    except Exception:
+        sqlite_logger.error(
+            f"Ошибка при определении фио пользователя {tg_id}", exc_info=True)
+
+
 def create_tables() -> None:
     """Создаем таблицы в пустой базе
     """
@@ -77,39 +105,13 @@ def create_tables() -> None:
 tg_id INT NOT NULL UNIQUE, fio TEXT NOT NULL)""")
             cursor.execute(
                 """CREATE TABLE IF NOT EXISTS CHANGELOG (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-CHANGER_TG_ID INT NOT NULL, CHANGE_TYPE TEXT NOT NULL)""")
+TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP,
+CHANGER_FIO TEXT NOT NULL, CHANGE_TYPE TEXT NOT NULL)""")
             sqlite_logger.info("База данных успешно создана ")
     except Exception as exc:
         print(exc)
         sqlite_logger.error(
             "Произошла ошибка при создании таблиц", exc_info=True)
-
-
-def add_admin_user_db(tg_id=None, user_fio=None) -> True:
-    """Добавить администратора в бд
-    Args:
-        tg_id (str, optional): телеграм id нового пользователя. Defaults to None.
-        user_fio (str, optional): фио администратора . Defaults to None.
-        user_phone (str, optional): телефон для перевода деружного номера. Defaults to None.
-
-    Returns:
-        None
-    """
-    try:
-        with SQLite() as cursor:
-            sqlite_logger.info(
-                f'Добавляем пользователя id = {tg_id}, fio = {user_fio}')
-            cursor.execute(f"""INSERT INTO ACCESS_TABLE(tg_id,fio) VALUES ({tg_id},'{user_fio}');""".format(
-                tg_id=tg_id, fio=user_fio))
-            sqlite_logger.info(
-                f"Пользователь добавлен id={tg_id}, fio={user_fio}")
-    except sqlite3.IntegrityError as exc:
-        sqlite_logger.error(f"Не могу добавить пользователя, значение {exc.args[0].split(':')[1].split('.')[1]} не уникально",
-                            exc_info=True)
-    except Exception:
-        sqlite_logger.error(
-            "Произошла ошибка при добавлении пользователя", exc_info=True)
 
 
 def show_all_admin_db() -> dict:
@@ -125,6 +127,22 @@ def show_all_admin_db() -> dict:
         sqlite_logger.error(
             "Произошла ошибка при запросе администраторов", exc_info=True)
         return {}
+
+
+def show_change_log() -> str:
+    try:
+        with SQLite() as cursor:
+            sqlite_logger.info("Запрошена статистика изменений")
+            query_result = cursor.execute(
+                "SELECT TIMESTAMP,CHANGER_FIO,CHANGE_TYPE FROM CHANGELOG order by TIMESTAMP DESC").fetchall()
+            result = ""
+            for row in query_result:
+                result += ",".join(elem for elem in row) + "\n"
+            return result
+    except Exception:
+        sqlite_logger.error(
+            "Произошла ошибка при запросе статистики изменений")
+        raise
 
 
 def delete_admin_user_db(admin_id, tg_id_for_delete) -> bool:
