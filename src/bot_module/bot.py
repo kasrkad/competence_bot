@@ -1,6 +1,10 @@
 import telebot
 from os.path import splitext
-from os import environ
+import json
+from os import environ,remove
+from json2xml import json2xml
+from datetime import datetime
+from json2xml.utils import readfromstring
 from logger_config.logger import create_logger
 from sqlite_module.sql_lib import create_tables, load_admin_from_json,\
     check_admin_permissions, chengelog_insert, show_all_admin_db, insert_admin,\
@@ -10,6 +14,8 @@ from template_worker.worker import checklist_delete, checklist_updater,\
     jira_get_all_projects, jira_get_all_templates, checklist_loader
 from json_operator.operator import load_1c_data_from_file, get_competence_codes,\
     jira_id_for_1c, data_from_1c_compare, data_from_jira_compare
+from competence_scanner.scanner import users_with_competences,get_issues_data
+
 
 
 JIRA_TEST_ADDR = environ["JIRA_TEST_ADDR"]
@@ -45,6 +51,57 @@ class Competence_bot:
                 competence_bot_logger.error(
                     f'У пользователя с id {message.from_user.id} нет прав доступа.')
         return wrapper
+
+
+    def get_competences_from_jira(self,message,jql_search:str = None) :
+        try:
+            competence_codes = get_competence_codes(load_1c_data_from_file("./1c/1c.json"))
+            if jql_search:
+                competence_bot_logger.info(f"Запрошена выгрузка компетенций за период")
+                issues = get_issues_data(jira_token=JIRA_MAIN_TOKEN,jira_host=JIRA_MAIN_ADDR,jql=jql_search)
+            else:
+                competence_bot_logger.info(f"Запрошена выгрузка компетенций с начала месяца")
+                issues = get_issues_data(jira_token=JIRA_MAIN_TOKEN,jira_host=JIRA_MAIN_ADDR)
+            now = datetime.now()
+            date_time = now.strftime("%Y.%m.%d")
+            users_competences = users_with_competences(competence_codes=competence_codes,issues=issues)
+            data = json.dumps({"date":date_time, "competence_block":users_competences},ensure_ascii=False)
+            xml_data = readfromstring(data)
+            with open("result_xml.xml", 'w',encoding="utf-8") as outfile:
+                outfile.write(json2xml.Json2xml(xml_data, wrapper="all", pretty=True).to_xml())
+            doc_for_send = open("result_xml.xml")
+            self.bot.send_document(message.from_user.id,doc_for_send)
+            doc_for_send.close()
+            remove("result_xml.xml")
+        except FileNotFoundError:
+            self.bot.send_message(message.from_user.id,"Файл 1c.json не найден, загрузите файл и попробуйте еще раз")
+            competence_bot_logger.error(f"Ошибка при работе с выгрузкой компетенций не найден файл 1с.json")
+            return
+        except Exception:
+            self.bot.send_message(message.from_user.id,"Во время запроса компетенций произошла ошибка")
+            competence_bot_logger.error(f"Ошибка при работе с выгрузкой компетенций строка поиска = {jql_search}", exc_info=True)
+            return
+
+
+    def get_jira_competence_period_dialogue(self, message):
+        competence_bot_logger.info("Запрашиваем поиск компетенций по датам")
+        user_response = self.bot.send_message(message.from_user.id, "Введите период для выгрузки через пробел,формат DD-MM-YYYY. Пример:\n01-01-2023 01-03-2023")
+        self.bot.register_next_step_handler(user_response, self.get_jira_competence_period)
+
+
+    def get_jira_competence_period(self, message):
+        try:
+            start_period, end_period = message.text.strip().split(" ")
+            start_day,start_month,start_year = start_period.split("-")
+            end_day,end_month,end_year = end_period.split("-")
+        except Exception:
+            self.bot.send_message(message.from_user.id,"Ошибка в указанных датах, проверьте их и повторите попытку.")
+            return
+        jql_search = f"'Competences Checklist' is not null AND statusCategory = Done AND resolutiondate >= '{start_year}/{start_month}/{start_day}' \
+AND resolutiondate <='{end_year}/{end_month}/{end_day}' ORDER BY updated DESC"
+        print(jql_search)
+        self.get_competences_from_jira(message=message,jql_search=jql_search)
+
 
     def load_to_jira(self, tg_id, jira_host, jira_token):
         try:
@@ -263,10 +320,12 @@ class Competence_bot:
                     show_user_access_menu(call)
                 if call.data == "get_month_data":
                     self.bot.send_message(
-                        call.from_user.id, "Запрашиваем выгрузку компетенций с начала месяца")
+                        call.from_user.id, "Запрашиваем выгрузку компетенций с начала текущего месяца,может занять какое-то время")
+                    self.get_competences_from_jira(message=call)
                 if call.data == "get_period_data":
                     self.bot.send_message(
-                        call.from_user.id, "Запрашиваем выгрузку компетенций с по указанному периоду")
+                        call.from_user.id, "Запрашиваем выгрузку компетенций с по периоду")
+                    self.get_jira_competence_period_dialogue(message=call)
                 if call.data == "delete_templates_test":
                     self.bot.send_message(
                         call.from_user.id, "Очищаем шаблоны в тестовой Jira")
