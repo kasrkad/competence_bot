@@ -1,3 +1,3 @@
 # GET
 # Authorization: Bearer {{token}}
-ISSUE_REQUEST = "http://{jira_host}/rest/api/latest/issue/{issue_id}"
+ISSUE_REQUEST = "https://{jira_host}/rest/api/2/search"

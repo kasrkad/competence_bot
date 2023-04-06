@@ -1,6 +1,7 @@
 import telebot
 from os.path import splitext
 import json
+from time import sleep
 from os import environ,remove
 from json2xml import json2xml
 from datetime import datetime
@@ -356,10 +357,16 @@ AND resolutiondate <='{end_year}/{end_month}/{end_day}' ORDER BY updated DESC"
                 show_main_menu(call)
 
     def run(self):
-        competence_bot_logger.info(
-            "Проверяем базу, проверяем пользователей, создаем если отсуствует")
-        create_tables()
-        load_admin_from_json()
-        competence_bot_logger.info("Запускаем бота")
-        self.bot_commands()
-        self.bot.polling(none_stop=True, interval=0, timeout=200)
+        while True:
+            try:
+                competence_bot_logger.info(
+                    "Проверяем базу, проверяем пользователей, создаем если отсуствует")
+                create_tables()
+                load_admin_from_json()
+                competence_bot_logger.info("Запускаем бота")
+                self.bot_commands()
+                self.bot.polling(none_stop=True, interval=0, timeout=200)
+            except Exception:
+                competence_bot_logger.error("Ошибка в работе бота", exc_info=True)
+                sleep(30)
+                continue
