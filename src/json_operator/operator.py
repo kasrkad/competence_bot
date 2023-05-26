@@ -55,6 +55,7 @@ def get_competence_codes(data_1c: dict) -> dict:
     competence_codes = {}
     for project in data_1c:
         for profiles in project["profiles"]:
+            competence_codes[f"{profiles['functionalDirection']}|{profiles['name']}"] = profiles["id"]
             for competence in profiles["competences"]:
                 if competence["id"] not in competence_codes:
                     competence_codes[competence["name"]] = competence["id"]

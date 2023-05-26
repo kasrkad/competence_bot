@@ -45,7 +45,6 @@ def get_issues_data(jira_token:str, jira_host:str,
 
     return issues_result 
 
-
 def users_with_competences(competence_codes:dict, issues:dict) -> dict:
     """Выдергиваем из списка талонов пользователей
     и проставленные компетенции
@@ -53,31 +52,52 @@ def users_with_competences(competence_codes:dict, issues:dict) -> dict:
     Returns:
         dict: ключ пользователи, значение список их компетенций
     """
-    result_competences = []
     scanner_logger.info("Начинаем формировать компетенции пользователей")
     assignee = {}
     for issue in issues:
         try:
             assignee_name = issue["fields"]["assignee"]["displayName"]
             assignee_email = issue["fields"]["assignee"]["emailAddress"]
+            issue_key = issue["key"]
+            field = issue["fields"]["customfield_15950"]
         except TypeError:
             continue
-        
-        if assignee_name and (assignee_name not in assignee):
-            assignee[assignee_name] = dict()
-            assignee[assignee_name]["user_name"] = assignee_name
-            assignee[assignee_name]["email"] = assignee_email
-            assignee[assignee_name]["checked"] = []
-            assignee[assignee_name]["unchecked"] = []  
+        except KeyError:
+            scanner_logger.error(f"В заявке {issue_key} не найдено поле с компетенциями customfield_15950, пропускаем")
+            continue
 
+        if assignee_email and (assignee_email not in assignee):
+            assignee[assignee_email] = dict()
+            assignee[assignee_email]["user_name"] = assignee_name
+            assignee[assignee_email]["tasks"] = []
+        user_task = []
+        profiles_data = []
+        jira_tasks = {}
+        jira_tasks["profiles"] = []
+        issue_competences = []
+        header_code_old = None
+        
         for competence in issue["fields"]["customfield_15950"]:
-            if competence:
-                competence_code = competence_codes.get(competence["name"],None)
-                if competence["checked"]== True and competence_code is not None:
-                    assignee[assignee_name]["checked"] += [competence_code]
-                elif competence["checked"]== False and competence_code is not None:
-                    assignee[assignee_name]["unchecked"] += [competence_code]
+
+            if competence['isHeader']:
+                if header_code_old is None:
+                    header_code_old = competence_codes.get(competence['name'], None)
+                if issue_competences and header_code_old is not None:
+                    profiles_data.append({"profile_id":header_code_old,"competences":issue_competences})
                 else:
-                    scanner_logger.warn(f"не найден код для {competence['name']}, пользователя {assignee_name} задача {issue['key']}")  
-        result_competences = [value for key,value in assignee.items()]
-    return result_competences
+                    scanner_logger.info(f"В талоне {issue_key} проблема с профилем, вероятно невозможно определить код профиля")
+                issue_competences = []
+                header_code_old = competence_codes.get(competence['name'], None)
+                continue
+            issue_competences.append({"id":competence_codes.get(competence["name"]),"checked":competence["checked"]})
+        
+        if issue_competences and header_code_old:
+            profiles_data.append({"profile_id":header_code_old,"competences":issue_competences})
+        if profiles_data:
+            user_task.append({"jira_task":issue_key,"profiles": profiles_data})
+        if user_task:
+            assignee[assignee_email]["tasks"].append(*user_task)
+        else:
+            del assignee[assignee_email]
+            scanner_logger.info(f"У пользователя {assignee_email} не найдены задачи с указанными компетенциями")
+    return assignee
